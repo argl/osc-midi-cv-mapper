@@ -1,0 +1,10 @@
+[package]
+name = "osc-midi-ctrl"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+clap = { version = "4.5.32", features = ["derive"] }
+cpal = "0.15.3"
+midir = "0.10.1"
+rosc = { version = "0.11.3", features = ["clippy", "lints"] }
