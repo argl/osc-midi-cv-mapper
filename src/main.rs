@@ -7,7 +7,6 @@ use rosc::{OscMessage, OscPacket, decoder};
 use std::collections::HashMap;
 use std::net::UdpSocket;
 use std::sync::{Arc, Mutex};
-use std::thread;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -19,18 +18,16 @@ struct Args {
 
     #[arg(long)]
     midi_device: Option<String>,
+
+    #[arg(long, default_value = "false")]
+    debug: bool,
+
+    #[arg(long, default_value = "false")]
+    list_devices: bool,
 }
 
 fn find_audio_device(name: &Option<String>) -> Device {
     let host = cpal::default_host();
-    println!("Available audio devices:");
-    for device in host.output_devices().unwrap() {
-        println!(
-            "{}: {}",
-            device.name().unwrap(),
-            device.default_output_config().unwrap().sample_format()
-        );
-    }
     if let Some(name) = name {
         host.output_devices()
             .unwrap()
@@ -42,14 +39,17 @@ fn find_audio_device(name: &Option<String>) -> Device {
     }
 }
 
+fn list_audio_devices() {
+    let host = cpal::default_host();
+    println!("\n** Available Audio devices **");
+    for device in host.output_devices().unwrap() {
+        println!("{}", device.name().unwrap(),);
+    }
+}
+
 fn find_midi_device(name: &Option<String>) -> MidiOutputConnection {
     let midi_out = MidiOutput::new("OSC-MIDI-Bridge").unwrap();
     let ports = midi_out.ports();
-
-    println!("Available MIDI devices:");
-    for (i, port) in ports.iter().enumerate() {
-        println!("{}: {}", i, midi_out.port_name(port).unwrap());
-    }
 
     let port = if let Some(name) = name {
         ports
@@ -67,12 +67,28 @@ fn find_midi_device(name: &Option<String>) -> MidiOutputConnection {
         .expect("Failed to connect MIDI device")
 }
 
-fn main() {
-    let args = Args::parse();
+fn list_midi_devices() {
+    let midi_out = MidiOutput::new("OSC-MIDI-Bridge").unwrap();
+    let ports = midi_out.ports();
 
-    let audio_device = find_audio_device(&args.audio_device);
+    println!("\n** Available MIDI devices **");
+    for port in ports.iter() {
+        println!("{}", midi_out.port_name(port).unwrap());
+    }
+}
+
+fn main() {
+    let cmdline_args = Args::parse();
+
+    if cmdline_args.list_devices {
+        list_audio_devices();
+        list_midi_devices();
+        return;
+    }
+
+    let audio_device = find_audio_device(&cmdline_args.audio_device);
     println!("Using audio device: {}", audio_device.name().unwrap());
-    let midi_conn = Arc::new(Mutex::new(find_midi_device(&args.midi_device)));
+    let midi_conn = Arc::new(Mutex::new(find_midi_device(&cmdline_args.midi_device)));
 
     let channels = 8;
     let latest_values = Arc::new(Mutex::new(vec![0f32; channels]));
@@ -103,16 +119,16 @@ fn main() {
 
     stream.play().unwrap();
 
-    let osc_socket = UdpSocket::bind(format!("0.0.0.0:{}", args.osc_port)).unwrap();
-    println!("Listening on OSC port {}", args.osc_port);
+    let osc_socket = UdpSocket::bind(format!("0.0.0.0:{}", cmdline_args.osc_port)).unwrap();
+    println!("Listening on OSC port {}", cmdline_args.osc_port);
 
     let osc_address_map: HashMap<&str, usize> = [
-        ("/lfo1", 2),
-        ("/lfo2", 3),
-        ("/lfo3", 4),
-        ("/lfo4", 5),
-        ("/stepped32", 6),
-        ("/stepped8", 7),
+        ("/lfo1", 0),
+        ("/lfo2", 1),
+        ("/lfo3", 2),
+        ("/lfo4", 3),
+        ("/stepped32", 4),
+        ("/stepped8", 5),
     ]
     .iter()
     .cloned()
@@ -136,13 +152,15 @@ fn main() {
                             let midi_message = [0xB0, channel as u8, midi_val];
                             midi_conn.lock().unwrap().send(&midi_message).unwrap();
 
-                            println!(
-                                "{} -> Channel {}: Audio {}, MIDI {}",
-                                addr,
-                                channel + 1,
-                                audio_val,
-                                midi_val
-                            );
+                            if cmdline_args.debug {
+                                println!(
+                                    "{} -> Channel {}: Audio {}, MIDI {}",
+                                    addr,
+                                    channel + 1,
+                                    audio_val,
+                                    midi_val
+                                );
+                            }
                         }
                     }
                 }
